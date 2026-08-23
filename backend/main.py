@@ -1,10 +1,17 @@
 from datetime import datetime, timezone
 from typing import Literal
+import hashlib
+import json
+import secrets
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Option Bazaar Dev API", version="0.3.0")
+app = FastAPI(title="Option Bazaar Dev API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 LOT_SIZES = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "SENSEX": 20}
@@ -12,6 +19,16 @@ positions: list[dict] = []
 trades: list[dict] = []
 logs: list[dict] = []
 settings = {"mode": "PAPER", "max_lots": 4, "max_open_positions": 3, "daily_loss_limit": 5000.0, "live_orders_enabled": False}
+fyers = {
+    "app_id": "",
+    "secret_id": "",
+    "redirect_uri": "",
+    "state": "",
+    "access_token": "",
+    "refresh_token": "",
+    "profile": None,
+}
+FYERS_API = "https://api-t1.fyers.in/api/v3"
 
 class PaperOrder(BaseModel):
     symbol: str = "NIFTY"
@@ -28,6 +45,14 @@ class RiskSettings(BaseModel):
     max_open_positions: int = Field(ge=1, le=20)
     daily_loss_limit: float = Field(gt=0)
 
+class FyersConfig(BaseModel):
+    app_id: str = Field(min_length=4)
+    secret_id: str = Field(min_length=4)
+    redirect_uri: str = Field(min_length=8)
+
+class FyersAuthCode(BaseModel):
+    auth_code: str = Field(min_length=8)
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -36,6 +61,28 @@ def now():
 def add_log(event: str, detail: str):
     logs.insert(0, {"time": now(), "event": event, "detail": detail})
     del logs[200:]
+
+
+def fyers_request(path: str, method: str = "GET", payload: dict | None = None, auth: bool = False):
+    headers = {"Content-Type": "application/json"}
+    if auth:
+        if not fyers["app_id"] or not fyers["access_token"]:
+            raise HTTPException(400, "FYERS access token is not available")
+        headers["Authorization"] = f'{fyers["app_id"]}:{fyers["access_token"]}'
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = Request(FYERS_API + path, data=data, headers=headers, method=method)
+    try:
+        with urlopen(req, timeout=15) as response:
+            return json.loads(response.read().decode())
+    except HTTPError as e:
+        body = e.read().decode(errors="replace")
+        try:
+            detail = json.loads(body).get("message") or body
+        except Exception:
+            detail = body
+        raise HTTPException(e.code, f"FYERS: {detail}")
+    except URLError as e:
+        raise HTTPException(502, f"Could not reach FYERS: {e.reason}")
 
 @app.get("/api/health")
 def health():
@@ -168,8 +215,69 @@ def report_summary():
 
 @app.get("/api/fyers/status")
 def fyers_status():
-    return {"configured": False, "authenticated": False, "live_orders_enabled": False, "message": "FYERS adapter is reserved for live verification. No real order route is enabled in this development build."}
+    configured = bool(fyers["app_id"] and fyers["secret_id"] and fyers["redirect_uri"])
+    authenticated = bool(fyers["access_token"])
+    return {
+        "configured": configured,
+        "authenticated": authenticated,
+        "live_orders_enabled": False,
+        "app_id": fyers["app_id"],
+        "redirect_uri": fyers["redirect_uri"],
+        "profile": fyers["profile"],
+        "message": "FYERS authenticated" if authenticated else ("FYERS credentials saved in backend memory" if configured else "Enter FYERS App ID, Secret ID and Redirect URL in Settings")
+    }
+
+@app.put("/api/fyers/config")
+def fyers_config(payload: FyersConfig):
+    fyers.update({"app_id": payload.app_id.strip(), "secret_id": payload.secret_id.strip(), "redirect_uri": payload.redirect_uri.strip(), "access_token": "", "refresh_token": "", "profile": None})
+    add_log("FYERS_CONFIG", f"Configured app {fyers['app_id']} with redirect URI {fyers['redirect_uri']}")
+    return {"ok": True, "configured": True, "app_id": fyers["app_id"], "redirect_uri": fyers["redirect_uri"]}
+
+@app.get("/api/fyers/login-url")
+def fyers_login_url():
+    if not (fyers["app_id"] and fyers["secret_id"] and fyers["redirect_uri"]):
+        raise HTTPException(400, "Save FYERS credentials first")
+    fyers["state"] = secrets.token_urlsafe(18)
+    query = urlencode({"client_id": fyers["app_id"], "redirect_uri": fyers["redirect_uri"], "response_type": "code", "state": fyers["state"]})
+    return {"ok": True, "url": f"{FYERS_API}/generate-authcode?{query}", "state": fyers["state"]}
+
+@app.post("/api/fyers/token")
+def fyers_token(payload: FyersAuthCode):
+    if not (fyers["app_id"] and fyers["secret_id"]):
+        raise HTTPException(400, "Save FYERS credentials first")
+    app_hash = hashlib.sha256(f'{fyers["app_id"]}:{fyers["secret_id"]}'.encode()).hexdigest()
+    result = fyers_request("/validate-authcode", "POST", {"grant_type": "authorization_code", "appIdHash": app_hash, "code": payload.auth_code.strip()})
+    token = result.get("access_token")
+    if not token:
+        raise HTTPException(400, result.get("message") or "FYERS did not return an access token")
+    fyers["access_token"] = token
+    fyers["refresh_token"] = result.get("refresh_token", "")
+    add_log("FYERS_TOKEN", "FYERS access token generated")
+    try:
+        profile = fyers_request("/profile", auth=True)
+        fyers["profile"] = profile.get("data") or profile
+    except HTTPException:
+        fyers["profile"] = None
+    return {"ok": True, "authenticated": True, "profile": fyers["profile"]}
+
+@app.get("/api/fyers/profile")
+def fyers_profile():
+    result = fyers_request("/profile", auth=True)
+    fyers["profile"] = result.get("data") or result
+    return result
+
+@app.post("/api/fyers/disconnect")
+def fyers_disconnect():
+    fyers.update({"access_token": "", "refresh_token": "", "profile": None})
+    add_log("FYERS_DISCONNECT", "FYERS local session cleared")
+    return {"ok": True}
+
+@app.get("/api/fyers/callback")
+def fyers_callback(auth_code: str = "", state: str = ""):
+    if not auth_code:
+        raise HTTPException(400, "auth_code missing from FYERS callback")
+    return {"ok": True, "auth_code": auth_code, "state": state, "message": "Copy this auth_code and paste it into Option Bazaar Settings → FYERS"}
 
 @app.post("/api/live/orders")
 def live_order_blocker():
-    raise HTTPException(403, "LIVE ORDERS DISABLED: complete FYERS authentication and explicit safety verification first")
+    raise HTTPException(403, "LIVE ORDERS DISABLED: FYERS login may be tested, but live order placement remains locked")

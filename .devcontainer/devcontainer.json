@@ -1,0 +1,13 @@
+{
+  "name": "Option Bazaar",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "forwardPorts": [5173, 8000],
+  "portsAttributes": {
+    "5173": { "label": "Option Bazaar Frontend", "onAutoForward": "openPreview" },
+    "8000": { "label": "Option Bazaar API", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "pip install -r backend/requirements.txt && npm install && npm --prefix frontend install"
+}

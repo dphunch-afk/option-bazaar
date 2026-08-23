@@ -7,78 +7,41 @@ import'./fullstack.css';
 const nav=[['Dashboard',LayoutDashboard],['Live Chart',ChartCandlestick],['Option Chain',Layers3],['Price Ladder',Layers3],['Factor-J AI',Bot],['Paper Trading',FlaskConical],['Live Trading',Radio],['Positions',WalletCards],['Trade History',History],['Logs',ScrollText],['Reports',BarChart3],['Settings',Settings]];
 const fallback=[24812.95,24812.90,24812.85,24812.80,24812.75,24812.70,24812.65,24812.60,24812.55,24812.50,24812.45,24812.40,24812.35];
 
-async function getJson(url,options){
- const r=await fetch(url,options);
- const d=await r.json().catch(()=>({}));
- if(!r.ok)throw new Error(d.detail||d.message||'Request failed');
- return d;
-}
+async function getJson(url,options){const r=await fetch(url,options);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||d.message||'Request failed');return d}
 
 function App(){
- const[page,setPage]=useState('Dashboard');
- const[limit,setLimit]=useState('24812.65');
- const[side,setSide]=useState('');
- const[ladder,setLadder]=useState(fallback);
- const[indices,setIndices]=useState([]);
- const[signal,setSignal]=useState(null);
- const[apiOk,setApiOk]=useState(false);
- const[lotSizes,setLotSizes]=useState({NIFTY:65,BANKNIFTY:30,FINNIFTY:60,SENSEX:20});
- const[positions,setPositions]=useState([]);
- const[trades,setTrades]=useState([]);
- const[chain,setChain]=useState([]);
- const[logs,setLogs]=useState([]);
- const[risk,setRisk]=useState({max_lots:4,max_open_positions:3,daily_loss_limit:5000});
- const[fyers,setFyers]=useState({configured:false,authenticated:false,live_orders_enabled:false});
-
- const refresh=async()=>{
-  const jobs=[
-   ['/api/health',d=>setApiOk(Boolean(d.ok))],
-   ['/api/market/summary',d=>setIndices(d.indices||[])],
-   ['/api/market/ladder',d=>setLadder(d.rows||fallback)],
-   ['/api/factor-j/signal',setSignal],
-   ['/api/instruments',d=>setLotSizes(d.lot_sizes||lotSizes)],
-   ['/api/positions',d=>setPositions(d.positions||[])],
-   ['/api/trades',d=>setTrades(d.trades||[])],
-   ['/api/market/option-chain',d=>setChain(d.rows||[])],
-   ['/api/logs',d=>setLogs(d.logs||[])],
-   ['/api/risk',setRisk],
-   ['/api/fyers/status',setFyers]
-  ];
-  await Promise.all(jobs.map(async([u,setter])=>{try{setter(await getJson(u))}catch(e){console.warn(u,e.message)}}));
- };
+ const[page,setPage]=useState('Dashboard'),[limit,setLimit]=useState('24812.65'),[side,setSide]=useState(''),[ladder,setLadder]=useState(fallback),[indices,setIndices]=useState([]),[signal,setSignal]=useState(null),[apiOk,setApiOk]=useState(false),[lotSizes,setLotSizes]=useState({NIFTY:65,BANKNIFTY:30,FINNIFTY:60,SENSEX:20}),[positions,setPositions]=useState([]),[trades,setTrades]=useState([]),[chain,setChain]=useState([]),[logs,setLogs]=useState([]),[risk,setRisk]=useState({max_lots:4,max_open_positions:3,daily_loss_limit:5000}),[fyers,setFyers]=useState({configured:false,authenticated:false,live_orders_enabled:false});
+ const refresh=async()=>{const jobs=[['/api/health',d=>setApiOk(Boolean(d.ok))],['/api/market/summary',d=>setIndices(d.indices||[])],['/api/market/ladder',d=>setLadder(d.rows||fallback)],['/api/factor-j/signal',setSignal],['/api/instruments',d=>setLotSizes(d.lot_sizes||lotSizes)],['/api/positions',d=>setPositions(d.positions||[])],['/api/trades',d=>setTrades(d.trades||[])],['/api/market/option-chain',d=>setChain(d.rows||[])],['/api/logs',d=>setLogs(d.logs||[])],['/api/risk',setRisk],['/api/fyers/status',setFyers]];await Promise.all(jobs.map(async([u,setter])=>{try{setter(await getJson(u))}catch(e){console.warn(u,e.message)}}))};
  useEffect(()=>{refresh()},[]);
  const pick=(p,s='')=>{setLimit(Number(p).toFixed(2));if(s)setSide(s)};
  const shared={ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,chain,logs,risk,fyers,refresh};
- return <div className="app"><aside><div className="brand"><b>OPTION <i>BAZAAR</i></b><small>Powered by Factor-J AI</small></div><nav>{nav.map(([name,Icon])=><button key={name} className={page===name?'active':''} onClick={()=>setPage(name)}><Icon size={16}/><span>{name}</span></button>)}</nav><div className="broker"><small>Broker</small><b>FYERS</b><em>{fyers.authenticated?'CONNECTED':'NOT CONNECTED'}</em></div></aside><main><Header indices={indices} apiOk={apiOk}/>{page==='Dashboard'?<Dashboard {...shared}/>:<PagePreview name={page} {...shared}/>}</main></div>;
+ return <div className="app"><aside><div className="brand"><b>OPTION <i>BAZAAR</i></b><small>Powered by Factor-J AI</small></div><nav>{nav.map(([name,Icon])=><button key={name} className={page===name?'active':''} onClick={()=>setPage(name)}><Icon size={16}/><span>{name}</span></button>)}</nav><div className="broker"><small>Broker</small><b>FYERS</b><em>{fyers.authenticated?'CONNECTED':fyers.configured?'CONFIGURED':'NOT CONNECTED'}</em></div></aside><main><Header indices={indices} apiOk={apiOk}/>{page==='Dashboard'?<Dashboard {...shared}/>:<PagePreview name={page} {...shared}/>}</main></div>;
 }
 
-function Header({indices,apiOk}){
- const data=indices.length?indices:[{symbol:'NIFTY 50',ltp:24812.65,change_pct:.62},{symbol:'BANK NIFTY',ltp:51236.9,change_pct:.41},{symbol:'INDIA VIX',ltp:12.45,change_pct:-2.51}];
- return <header>{data.map(x=><div className="ticker" key={x.symbol}><small>{x.symbol}</small><b>{Number(x.ltp).toLocaleString()}</b><span className={x.change_pct>=0?'pos':'neg'}>{x.change_pct>0?'+':''}{x.change_pct}%</span></div>)}<div className="status">● {apiOk?'BACKEND READY':'TEST PREVIEW'} &nbsp; ● PAPER</div></header>;
-}
+function Header({indices,apiOk}){const data=indices.length?indices:[{symbol:'NIFTY 50',ltp:24812.65,change_pct:.62},{symbol:'BANK NIFTY',ltp:51236.9,change_pct:.41},{symbol:'INDIA VIX',ltp:12.45,change_pct:-2.51}];return <header>{data.map(x=><div className="ticker" key={x.symbol}><small>{x.symbol}</small><b>{Number(x.ltp).toLocaleString()}</b><span className={x.change_pct>=0?'pos':'neg'}>{x.change_pct>0?'+':''}{x.change_pct}%</span></div>)}<div className="status">● {apiOk?'BACKEND READY':'TEST PREVIEW'} &nbsp; ● PAPER</div></header>}
 
-function Dashboard({ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,refresh}){
- return <div className="content"><div className="upper"><section className="panel chartPanel"><Toolbar/><FakeChart/><div className="indicators"><span>Volume <b>2.153M</b></span><span>RSI 14 <b>58.21</b></span><span>Supertrend <b className="pos">Bullish</b></span></div></section><div className="right"><Ladder ladder={ladder} limit={limit} pick={pick}/><OrderPanel limit={limit} setLimit={setLimit} side={side} setSide={setSide} lotSizes={lotSizes} refresh={refresh}/></div></div><div className="lower"><PositionsMini positions={positions}/><section className="panel"><h3>Factor-J Signal <small>TEST DATA</small></h3><div className="signal">{signal?.signal||'STRONG BUY'} — {signal?.confidence||78}%</div><p>Trend: <span className="pos">{signal?.trend||'Bullish'}</span><br/>Risk/Reward: 1:{signal?.risk_reward||2.35}</p></section><TradesMini trades={trades}/></div></div>;
-}
-
+function Dashboard({ladder,limit,setLimit,pick,side,signal,lotSizes,positions,trades,refresh}){return <div className="content"><div className="upper"><section className="panel chartPanel"><Toolbar/><FakeChart/><div className="indicators"><span>Volume <b>2.153M</b></span><span>RSI 14 <b>58.21</b></span><span>Supertrend <b className="pos">Bullish</b></span></div></section><div className="right"><Ladder ladder={ladder} limit={limit} pick={pick}/><OrderPanel limit={limit} setLimit={setLimit} side={side} lotSizes={lotSizes} refresh={refresh}/></div></div><div className="lower"><PositionsMini positions={positions}/><section className="panel"><h3>Factor-J Signal <small>TEST DATA</small></h3><div className="signal">{signal?.signal||'STRONG BUY'} — {signal?.confidence||78}%</div><p>Trend: <span className="pos">{signal?.trend||'Bullish'}</span><br/>Risk/Reward: 1:{signal?.risk_reward||2.35}</p></section><TradesMini trades={trades}/></div></div>}
 function Toolbar(){return <div className="toolbar"><div><button className="sel">NIFTY 50</button><button>BANK NIFTY</button><button>FINNIFTY</button></div><div><button>5s</button><button>1m</button><button className="sel">5m</button><button>Indicators ▾</button></div></div>}
 function FakeChart(){return <div className="chart"><div className="test">TEST DATA</div>{Array.from({length:54},(_,i)=><span key={i} className={'candle '+(i%3?'up':'down')} style={{left:24+i*15,top:55+(i*31)%250,height:24+(i*17)%70}}/>)}<div className="trendline"/><div className="trade tp">TP 24,950 &nbsp; +₹8,925</div><div className="trade entry">ENTRY 24,812.65 &nbsp; ₹0</div><div className="trade sl">SL 24,700 &nbsp; -₹7,322</div></div>}
 function Ladder({ladder,limit,pick}){return <section className="panel"><h3>Price Ladder <small>TEST DATA</small></h3><div className="lh"><span>BUY</span><span>PRICE</span><span>SELL</span></div>{ladder.slice(0,13).map(p=><div className="lr" key={p}><button className="buy" onClick={()=>pick(p,'BUY')}>BUY</button><button className={'price '+(Number(limit)===Number(p)?'chosen':'')} onClick={()=>pick(p)}>{Number(p).toFixed(2)}</button><button className="sell" onClick={()=>pick(p,'SELL')}>SELL</button></div>)}</section>}
 
-function OrderPanel({limit,setLimit,side,lotSizes,refresh}){
- const[symbol,setSymbol]=useState('NIFTY');
- const[lots,setLots]=useState(1);
- const[msg,setMsg]=useState('');
- const lot=lotSizes[symbol]||1;
- const qty=lot*Math.max(1,Number(lots)||1);
- const submit=async(kind)=>{try{setMsg('Sending paper order...');await getJson('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,product:symbol+' TEST '+kind,side:side||'BUY',lots:Number(lots),price:Number(limit),order_type:'LIMIT',stop_loss:Number(limit)-5,take_profit:Number(limit)+10})});setMsg('Paper order filled');await refresh()}catch(e){setMsg(e.message)}};
- return <section className="panel order"><h3>Quick Order <small>{side||'PAPER'}</small></h3><label>Symbol<select value={symbol} onChange={e=>setSymbol(e.target.value)}>{Object.keys(lotSizes).map(s=><option key={s}>{s}</option>)}</select></label><div className="cols"><label>Lots<input type="number" min="1" value={lots} onChange={e=>setLots(e.target.value)}/></label><label>Lot Size<input value={lot} readOnly/></label></div><label>Total Qty<input value={qty} readOnly/></label><label>Order Type<select><option>LIMIT</option><option>MARKET</option></select></label><label>Limit Price<input value={limit} onChange={e=>setLimit(e.target.value)}/></label><div className="actions"><button className="buyMain" onClick={()=>submit('CE')}>BUY CALL</button><button className="sellMain" onClick={()=>submit('PE')}>BUY PUT</button></div>{msg&&<p className="notice">{msg}</p>}</section>;
-}
+function OrderPanel({limit,setLimit,side,lotSizes,refresh}){const[symbol,setSymbol]=useState('NIFTY'),[lots,setLots]=useState(1),[msg,setMsg]=useState('');const lot=lotSizes[symbol]||1,qty=lot*Math.max(1,Number(lots)||1);const submit=async(kind)=>{try{setMsg('Sending paper order...');await getJson('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,product:symbol+' TEST '+kind,side:side||'BUY',lots:Number(lots),price:Number(limit),order_type:'LIMIT',stop_loss:Number(limit)-5,take_profit:Number(limit)+10})});setMsg('Paper order filled');await refresh()}catch(e){setMsg(e.message)}};return <section className="panel order"><h3>Quick Order <small>{side||'PAPER'}</small></h3><label>Symbol<select value={symbol} onChange={e=>setSymbol(e.target.value)}>{Object.keys(lotSizes).map(s=><option key={s}>{s}</option>)}</select></label><div className="cols"><label>Lots<input type="number" min="1" value={lots} onChange={e=>setLots(e.target.value)}/></label><label>Lot Size<input value={lot} readOnly/></label></div><label>Total Qty<input value={qty} readOnly/></label><label>Order Type<select><option>LIMIT</option><option>MARKET</option></select></label><label>Limit Price<input value={limit} onChange={e=>setLimit(e.target.value)}/></label><div className="actions"><button className="buyMain" onClick={()=>submit('CE')}>BUY CALL</button><button className="sellMain" onClick={()=>submit('PE')}>BUY PUT</button></div>{msg&&<p className="notice">{msg}</p>}</section>}
 
 function PositionsMini({positions}){return <section className="panel"><h3>Positions <small>PAPER</small></h3><table><tbody><tr><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&L</th></tr>{positions.length?positions.slice(0,4).map((x,i)=><tr key={i}><td>{x.product}</td><td>{x.quantity}</td><td>{x.avg}</td><td>{x.ltp}</td><td className={x.pnl>=0?'pos':'neg'}>{x.pnl}</td></tr>):<tr><td colSpan="5">No paper positions yet</td></tr>}</tbody></table></section>}
 function TradesMini({trades}){return <section className="panel"><h3>Recent Trades</h3><p className="mono">{trades.length?trades.slice(0,4).map(t=><React.Fragment key={t.id}>{t.side} {t.product} x {t.quantity} @ {t.price}<br/></React.Fragment>):'No paper trades yet'}</p></section>}
 
-function PagePreview({name,chain,positions,trades,logs,risk,fyers,ladder,limit,pick}){
+function FyersSettings({fyers,refresh}){
+ const[appId,setAppId]=useState(fyers.app_id||''),[secret,setSecret]=useState(''),[redirect,setRedirect]=useState(fyers.redirect_uri||''),[authCode,setAuthCode]=useState(''),[loginUrl,setLoginUrl]=useState(''),[msg,setMsg]=useState('');
+ useEffect(()=>{setAppId(fyers.app_id||'');setRedirect(fyers.redirect_uri||'')},[fyers.app_id,fyers.redirect_uri]);
+ const save=async()=>{try{setMsg('Saving FYERS settings...');await getJson('/api/fyers/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_id:appId,secret_id:secret,redirect_uri:redirect})});setMsg('FYERS credentials saved in backend memory');await refresh()}catch(e){setMsg(e.message)}};
+ const makeLink=async()=>{try{const d=await getJson('/api/fyers/login-url');setLoginUrl(d.url);setMsg('Login link ready — open it, log in, then paste the auth_code below')}catch(e){setMsg(e.message)}};
+ const token=async()=>{try{setMsg('Exchanging auth code with FYERS...');const d=await getJson('/api/fyers/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auth_code:authCode})});setMsg(d.authenticated?'FYERS CONNECTED':'Token not confirmed');await refresh()}catch(e){setMsg(e.message)}};
+ const disconnect=async()=>{await getJson('/api/fyers/disconnect',{method:'POST'});setLoginUrl('');setAuthCode('');setMsg('FYERS session cleared');refresh()};
+ return <div className="content"><section className="panel order fyersSetup"><h3>FYERS API V3 Setup <small>{fyers.authenticated?'CONNECTED':fyers.configured?'CONFIGURED':'NOT CONNECTED'}</small></h3><div className="warning">Live order placement remains locked. This screen is for authentication and data connection testing first.</div><label>App ID / Client ID<input value={appId} onChange={e=>setAppId(e.target.value)} placeholder="XXXXXXXXX-200"/></label><label>Secret ID<input type="password" value={secret} onChange={e=>setSecret(e.target.value)} placeholder={fyers.configured?'Enter again only when changing':'Paste Secret ID'}/></label><label>Redirect URL<input value={redirect} onChange={e=>setRedirect(e.target.value)} placeholder="https://.../api/fyers/callback"/></label><div className="actions one"><button className="buyMain" onClick={save}>1. SAVE FYERS SETTINGS</button></div><div className="actions one"><button className="buyMain" onClick={makeLink} disabled={!fyers.configured}>2. MAKE FYERS LOGIN LINK</button></div>{loginUrl&&<div className="audit"><b>FYERS Login Link</b><div style={{wordBreak:'break-all',margin:'8px 0'}}>{loginUrl}</div><a href={loginUrl} target="_blank" rel="noreferrer" className="openLink">OPEN FYERS LOGIN</a></div>}<label>Authorization Code<input value={authCode} onChange={e=>setAuthCode(e.target.value)} placeholder="Paste auth_code returned by FYERS"/></label><div className="actions one"><button className="buyMain" onClick={token} disabled={!authCode}>3. GENERATE ACCESS TOKEN</button></div>{fyers.authenticated&&<div className="audit"><b className="pos">FYERS CONNECTED</b><div>App: {fyers.app_id}</div><div>Redirect: {fyers.redirect_uri}</div>{fyers.profile&&<div>Profile verified from FYERS.</div>}<button className="dangerAction" onClick={disconnect}>Disconnect FYERS</button></div>}{msg&&<p className="notice">{msg}</p>}</section></div>;
+}
+
+function PagePreview({name,chain,positions,trades,logs,risk,fyers,ladder,limit,pick,refresh}){
+ if(name==='Settings')return <FyersSettings fyers={fyers} refresh={refresh}/>;
  if(name==='Option Chain')return <div className="content"><section className="panel"><h3>Option Chain <small>TEST DATA</small></h3><div className="tableScroll"><table><tbody><tr><th>CE OI</th><th>CE LTP</th><th>Strike</th><th>PE LTP</th><th>PE OI</th></tr>{chain.map(r=><tr key={r.strike} className={r.atm?'atm':''}><td>{r.ce.oi}</td><td>{r.ce.ltp}</td><td><b>{r.strike}</b></td><td>{r.pe.ltp}</td><td>{r.pe.oi}</td></tr>)}</tbody></table></div></section></div>;
  if(name==='Positions')return <div className="content"><PositionsMini positions={positions}/></div>;
  if(name==='Trade History')return <div className="content"><TradesMini trades={trades}/></div>;
@@ -89,11 +52,5 @@ function PagePreview({name,chain,positions,trades,logs,risk,fyers,ladder,limit,p
  return <div className="content"><section className="panel placeholder"><h2>{name}</h2><p>This page is stable and ready for the next incremental implementation.</p><span>DEVELOPMENT / TEST ENVIRONMENT</span></section></div>;
 }
 function Metric({k,v}){return <div className="metric"><small>{k}</small><b>{v}</b></div>}
-
-class ErrorBoundary extends React.Component{
- constructor(props){super(props);this.state={error:null}}
- static getDerivedStateFromError(error){return{error}}
- render(){if(this.state.error)return <div style={{padding:30,color:'#fff',background:'#07101d',minHeight:'100vh'}}><h2>Option Bazaar frontend error</h2><pre style={{whiteSpace:'pre-wrap',color:'#ff9fa4'}}>{String(this.state.error)}</pre></div>;return this.props.children}
-}
-
+class ErrorBoundary extends React.Component{constructor(props){super(props);this.state={error:null}}static getDerivedStateFromError(error){return{error}}render(){if(this.state.error)return <div style={{padding:30,color:'#fff',background:'#07101d',minHeight:'100vh'}}><h2>Option Bazaar frontend error</h2><pre style={{whiteSpace:'pre-wrap',color:'#ff9fa4'}}>{String(this.state.error)}</pre></div>;return this.props.children}}
 createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);

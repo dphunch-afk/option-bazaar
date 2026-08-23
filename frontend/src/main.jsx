@@ -1,42 +1,99 @@
-import React,{useEffect,useMemo,useState}from'react';
+import React,{useEffect,useState}from'react';
 import{createRoot}from'react-dom/client';
 import{LayoutDashboard,ChartCandlestick,Layers3,Bot,FlaskConical,Radio,History,Settings,ScrollText,BarChart3,WalletCards}from'lucide-react';
 import'./styles.css';
+import'./fullstack.css';
 
 const nav=[['Dashboard',LayoutDashboard],['Live Chart',ChartCandlestick],['Option Chain',Layers3],['Price Ladder',Layers3],['Factor-J AI',Bot],['Paper Trading',FlaskConical],['Live Trading',Radio],['Positions',WalletCards],['Trade History',History],['Logs',ScrollText],['Reports',BarChart3],['Settings',Settings]];
 const fallback=[24812.95,24812.90,24812.85,24812.80,24812.75,24812.70,24812.65,24812.60,24812.55,24812.50,24812.45,24812.40,24812.35];
-const api=(url,opts)=>fetch(url,opts).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||d.message||'Request failed');return d});
+
+async function getJson(url,options){
+ const r=await fetch(url,options);
+ const d=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(d.detail||d.message||'Request failed');
+ return d;
+}
 
 function App(){
- const[page,setPage]=useState('Dashboard'),[limit,setLimit]=useState('24812.65'),[side,setSide]=useState(''),[ladder,setLadder]=useState(fallback),[indices,setIndices]=useState([]),[signal,setSignal]=useState(null),[apiOk,setApiOk]=useState(false),[lotSizes,setLotSizes]=useState({NIFTY:65}),[positions,setPositions]=useState([]),[trades,setTrades]=useState([]),[chain,setChain]=useState([]),[indicators,setIndicators]=useState([]),[logs,setLogs]=useState([]),[risk,setRisk]=useState({}),[fyers,setFyers]=useState({});
- const refresh=()=>Promise.allSettled([
-  api('/api/health').then(d=>setApiOk(d.ok)),api('/api/market/summary').then(d=>setIndices(d.indices)),api('/api/market/ladder').then(d=>setLadder(d.rows)),api('/api/factor-j/signal').then(setSignal),api('/api/instruments').then(d=>setLotSizes(d.lot_sizes)),api('/api/positions').then(d=>setPositions(d.positions)),api('/api/trades').then(d=>setTrades(d.trades)),api('/api/market/option-chain').then(d=>setChain(d.rows)),api('/api/indicators/registry').then(d=>setIndicators(d.indicators)),api('/api/logs').then(d=>setLogs(d.logs)),api('/api/risk').then(setRisk),api('/api/fyers/status').then(setFyers)
- ]);
- useEffect(()=>{refresh();const id=setInterval(()=>api('/api/market/summary').then(d=>setIndices(d.indices)).catch(()=>{}),5000);return()=>clearInterval(id)},[]);
- const pick=(p,s='')=>{setLimit(Number(p).toFixed(2));if(s)setSide(s)};
- const common={ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,chain,indicators,logs,risk,fyers,refresh};
- return <div className="app"><aside><div className="brand"><b>OPTION <i>BAZAAR</i></b><small>Powered by Factor-J AI</small></div><nav>{nav.map(([n,I])=><button key={n} className={page===n?'active':''} onClick={()=>setPage(n)}><I size={16}/><span>{n}</span></button>)}</nav><div className="broker"><small>Broker</small><b>FYERS</b><em>{fyers.authenticated?'CONNECTED':'NOT CONNECTED'}</em></div></aside><main><Header indices={indices} apiOk={apiOk}/><Page name={page} {...common}/></main></div>
-}
-function Header({indices,apiOk}){const data=indices.length?indices:[{symbol:'NIFTY 50',ltp:24812.65,change_pct:.62},{symbol:'BANK NIFTY',ltp:51236.9,change_pct:.41},{symbol:'INDIA VIX',ltp:12.45,change_pct:-2.51}];return <header>{data.map(x=><div className="ticker" key={x.symbol}><small>{x.symbol}</small><b>{Number(x.ltp).toLocaleString()}</b><span className={x.change_pct>=0?'pos':'neg'}>{x.change_pct>0?'+':''}{x.change_pct}%</span></div>)}<div className="status">● {apiOk?'BACKEND READY':'TEST PREVIEW'} &nbsp; ● PAPER MODE</div></header>}
-function Page({name,...p}){if(name==='Dashboard')return <Dashboard {...p}/>;if(name==='Live Chart')return <ChartPage indicators={p.indicators}/>;if(name==='Option Chain')return <ChainPage chain={p.chain}/>;if(name==='Price Ladder')return <LadderPage {...p}/>;if(name==='Factor-J AI')return <FactorPage signal={p.signal}/>;if(name==='Paper Trading')return <PaperPage {...p}/>;if(name==='Live Trading')return <LivePage fyers={p.fyers}/>;if(name==='Positions')return <PositionsPage positions={p.positions}/>;if(name==='Trade History')return <TradesPage trades={p.trades}/>;if(name==='Logs')return <LogsPage logs={p.logs}/>;if(name==='Reports')return <ReportsPage trades={p.trades} positions={p.positions}/>;return <SettingsPage risk={p.risk} lotSizes={p.lotSizes} refresh={p.refresh}/>}
+ const[page,setPage]=useState('Dashboard');
+ const[limit,setLimit]=useState('24812.65');
+ const[side,setSide]=useState('');
+ const[ladder,setLadder]=useState(fallback);
+ const[indices,setIndices]=useState([]);
+ const[signal,setSignal]=useState(null);
+ const[apiOk,setApiOk]=useState(false);
+ const[lotSizes,setLotSizes]=useState({NIFTY:65,BANKNIFTY:30,FINNIFTY:60,SENSEX:20});
+ const[positions,setPositions]=useState([]);
+ const[trades,setTrades]=useState([]);
+ const[chain,setChain]=useState([]);
+ const[logs,setLogs]=useState([]);
+ const[risk,setRisk]=useState({max_lots:4,max_open_positions:3,daily_loss_limit:5000});
+ const[fyers,setFyers]=useState({configured:false,authenticated:false,live_orders_enabled:false});
 
-function FakeChart({large=false}){return <div className={'chart '+(large?'chartLarge':'')}><div className="test">TEST DATA</div>{Array.from({length:70},(_,i)=><span key={i} className={'candle '+(i%3?'up':'down')} style={{left:24+i*14,top:55+(i*31)%260,height:24+(i*17)%70}}/>)}<div className="trendline"/><div className="trade tp">TP 24,950 &nbsp; +₹8,925</div><div className="trade entry">ENTRY 24,812.65 &nbsp; ₹0</div><div className="trade sl">SL 24,700 &nbsp; -₹7,322</div></div>}
-function Dashboard({ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,refresh}){return <div className="content"><div className="upper"><section className="panel chartPanel"><Toolbar/><FakeChart/><div className="indicators"><span>Volume <b>2.153M</b></span><span>RSI 14 <b>58.21</b></span><span>Supertrend <b className="pos">Bullish</b></span></div></section><div className="right"><Ladder ladder={ladder} limit={limit} pick={pick}/><OrderPanel limit={limit} setLimit={setLimit} side={side} setSide={setSide} lotSizes={lotSizes} refresh={refresh}/></div></div><div className="lower"><PositionsMini positions={positions}/><section className="panel"><h3>Factor-J Signal <small>TEST DATA</small></h3><div className="signal">{signal?.signal||'STRONG BUY'} — {signal?.confidence||78}%</div><p>Trend: <span className="pos">{signal?.trend||'Bullish'}</span><br/>Risk/Reward: 1:{signal?.risk_reward||2.35}</p></section><TradesMini trades={trades}/></div></div>}
+ const refresh=async()=>{
+  const jobs=[
+   ['/api/health',d=>setApiOk(Boolean(d.ok))],
+   ['/api/market/summary',d=>setIndices(d.indices||[])],
+   ['/api/market/ladder',d=>setLadder(d.rows||fallback)],
+   ['/api/factor-j/signal',setSignal],
+   ['/api/instruments',d=>setLotSizes(d.lot_sizes||lotSizes)],
+   ['/api/positions',d=>setPositions(d.positions||[])],
+   ['/api/trades',d=>setTrades(d.trades||[])],
+   ['/api/market/option-chain',d=>setChain(d.rows||[])],
+   ['/api/logs',d=>setLogs(d.logs||[])],
+   ['/api/risk',setRisk],
+   ['/api/fyers/status',setFyers]
+  ];
+  await Promise.all(jobs.map(async([u,setter])=>{try{setter(await getJson(u))}catch(e){console.warn(u,e.message)}}));
+ };
+ useEffect(()=>{refresh()},[]);
+ const pick=(p,s='')=>{setLimit(Number(p).toFixed(2));if(s)setSide(s)};
+ const shared={ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,chain,logs,risk,fyers,refresh};
+ return <div className="app"><aside><div className="brand"><b>OPTION <i>BAZAAR</i></b><small>Powered by Factor-J AI</small></div><nav>{nav.map(([name,Icon])=><button key={name} className={page===name?'active':''} onClick={()=>setPage(name)}><Icon size={16}/><span>{name}</span></button>)}</nav><div className="broker"><small>Broker</small><b>FYERS</b><em>{fyers.authenticated?'CONNECTED':'NOT CONNECTED'}</em></div></aside><main><Header indices={indices} apiOk={apiOk}/>{page==='Dashboard'?<Dashboard {...shared}/>:<PagePreview name={page} {...shared}/>}</main></div>;
+}
+
+function Header({indices,apiOk}){
+ const data=indices.length?indices:[{symbol:'NIFTY 50',ltp:24812.65,change_pct:.62},{symbol:'BANK NIFTY',ltp:51236.9,change_pct:.41},{symbol:'INDIA VIX',ltp:12.45,change_pct:-2.51}];
+ return <header>{data.map(x=><div className="ticker" key={x.symbol}><small>{x.symbol}</small><b>{Number(x.ltp).toLocaleString()}</b><span className={x.change_pct>=0?'pos':'neg'}>{x.change_pct>0?'+':''}{x.change_pct}%</span></div>)}<div className="status">● {apiOk?'BACKEND READY':'TEST PREVIEW'} &nbsp; ● PAPER</div></header>;
+}
+
+function Dashboard({ladder,limit,setLimit,pick,side,setSide,signal,lotSizes,positions,trades,refresh}){
+ return <div className="content"><div className="upper"><section className="panel chartPanel"><Toolbar/><FakeChart/><div className="indicators"><span>Volume <b>2.153M</b></span><span>RSI 14 <b>58.21</b></span><span>Supertrend <b className="pos">Bullish</b></span></div></section><div className="right"><Ladder ladder={ladder} limit={limit} pick={pick}/><OrderPanel limit={limit} setLimit={setLimit} side={side} setSide={setSide} lotSizes={lotSizes} refresh={refresh}/></div></div><div className="lower"><PositionsMini positions={positions}/><section className="panel"><h3>Factor-J Signal <small>TEST DATA</small></h3><div className="signal">{signal?.signal||'STRONG BUY'} — {signal?.confidence||78}%</div><p>Trend: <span className="pos">{signal?.trend||'Bullish'}</span><br/>Risk/Reward: 1:{signal?.risk_reward||2.35}</p></section><TradesMini trades={trades}/></div></div>;
+}
+
 function Toolbar(){return <div className="toolbar"><div><button className="sel">NIFTY 50</button><button>BANK NIFTY</button><button>FINNIFTY</button></div><div><button>5s</button><button>1m</button><button className="sel">5m</button><button>Indicators ▾</button></div></div>}
-function Ladder({ladder,limit,pick,full=false}){return <section className="panel"><h3>Price Ladder <small>TEST DATA</small></h3><div className="lh"><span>BUY</span><span>PRICE</span><span>SELL</span></div>{ladder.slice(0,full?31:13).map(p=><div className="lr" key={p}><button className="buy" onClick={()=>pick(p,'BUY')}>BUY</button><button className={'price '+(Number(limit)===Number(p)?'chosen':'')} onClick={()=>pick(p)}>{Number(p).toFixed(2)}</button><button className="sell" onClick={()=>pick(p,'SELL')}>SELL</button></div>)}</section>}
-function OrderPanel({limit,setLimit,side,setSide,lotSizes,refresh}){const[symbol,setSymbol]=useState('NIFTY'),[lots,setLots]=useState(1),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false);const lot=lotSizes[symbol]||1,qty=lot*Number(lots||0);const submit=async(callput)=>{setBusy(true);setMsg('');try{await api('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,product:`${symbol} TEST ${callput}`,side:side||'BUY',lots:Number(lots),price:Number(limit),order_type:'LIMIT',stop_loss:Number(limit)-5,take_profit:Number(limit)+10})});setMsg('Paper order filled');await refresh()}catch(e){setMsg(e.message)}finally{setBusy(false)}};return <section className="panel order"><h3>Quick Order <small>{side||'PAPER'}</small></h3><label>Symbol<select value={symbol} onChange={e=>setSymbol(e.target.value)}>{Object.keys(lotSizes).map(s=><option key={s}>{s}</option>)}</select></label><div className="cols"><label>Lots<input type="number" min="1" value={lots} onChange={e=>setLots(e.target.value)}/></label><label>Lot Size<input value={lot} readOnly/></label></div><label>Total Qty<input value={qty} readOnly/></label><label>Order Type<select><option>LIMIT</option><option>MARKET</option></select></label><label>Limit Price<input value={limit} onChange={e=>setLimit(e.target.value)}/></label><div className="actions"><button disabled={busy} className="buyMain" onClick={()=>submit('CE')}>BUY CALL</button><button disabled={busy} className="sellMain" onClick={()=>submit('PE')}>BUY PUT</button></div>{msg&&<p className="notice">{msg}</p>}</section>}
+function FakeChart(){return <div className="chart"><div className="test">TEST DATA</div>{Array.from({length:54},(_,i)=><span key={i} className={'candle '+(i%3?'up':'down')} style={{left:24+i*15,top:55+(i*31)%250,height:24+(i*17)%70}}/>)}<div className="trendline"/><div className="trade tp">TP 24,950 &nbsp; +₹8,925</div><div className="trade entry">ENTRY 24,812.65 &nbsp; ₹0</div><div className="trade sl">SL 24,700 &nbsp; -₹7,322</div></div>}
+function Ladder({ladder,limit,pick}){return <section className="panel"><h3>Price Ladder <small>TEST DATA</small></h3><div className="lh"><span>BUY</span><span>PRICE</span><span>SELL</span></div>{ladder.slice(0,13).map(p=><div className="lr" key={p}><button className="buy" onClick={()=>pick(p,'BUY')}>BUY</button><button className={'price '+(Number(limit)===Number(p)?'chosen':'')} onClick={()=>pick(p)}>{Number(p).toFixed(2)}</button><button className="sell" onClick={()=>pick(p,'SELL')}>SELL</button></div>)}</section>}
+
+function OrderPanel({limit,setLimit,side,lotSizes,refresh}){
+ const[symbol,setSymbol]=useState('NIFTY');
+ const[lots,setLots]=useState(1);
+ const[msg,setMsg]=useState('');
+ const lot=lotSizes[symbol]||1;
+ const qty=lot*Math.max(1,Number(lots)||1);
+ const submit=async(kind)=>{try{setMsg('Sending paper order...');await getJson('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,product:symbol+' TEST '+kind,side:side||'BUY',lots:Number(lots),price:Number(limit),order_type:'LIMIT',stop_loss:Number(limit)-5,take_profit:Number(limit)+10})});setMsg('Paper order filled');await refresh()}catch(e){setMsg(e.message)}};
+ return <section className="panel order"><h3>Quick Order <small>{side||'PAPER'}</small></h3><label>Symbol<select value={symbol} onChange={e=>setSymbol(e.target.value)}>{Object.keys(lotSizes).map(s=><option key={s}>{s}</option>)}</select></label><div className="cols"><label>Lots<input type="number" min="1" value={lots} onChange={e=>setLots(e.target.value)}/></label><label>Lot Size<input value={lot} readOnly/></label></div><label>Total Qty<input value={qty} readOnly/></label><label>Order Type<select><option>LIMIT</option><option>MARKET</option></select></label><label>Limit Price<input value={limit} onChange={e=>setLimit(e.target.value)}/></label><div className="actions"><button className="buyMain" onClick={()=>submit('CE')}>BUY CALL</button><button className="sellMain" onClick={()=>submit('PE')}>BUY PUT</button></div>{msg&&<p className="notice">{msg}</p>}</section>;
+}
+
 function PositionsMini({positions}){return <section className="panel"><h3>Positions <small>PAPER</small></h3><table><tbody><tr><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&L</th></tr>{positions.length?positions.slice(0,4).map((x,i)=><tr key={i}><td>{x.product}</td><td>{x.quantity}</td><td>{x.avg}</td><td>{x.ltp}</td><td className={x.pnl>=0?'pos':'neg'}>{x.pnl}</td></tr>):<tr><td colSpan="5">No paper positions yet</td></tr>}</tbody></table></section>}
 function TradesMini({trades}){return <section className="panel"><h3>Recent Trades</h3><p className="mono">{trades.length?trades.slice(0,4).map(t=><React.Fragment key={t.id}>{t.side} {t.product} x {t.quantity} @ {t.price}<br/></React.Fragment>):'No paper trades yet'}</p></section>}
-function ChartPage({indicators}){return <div className="content"><section className="panel"><Toolbar/><FakeChart large/><div className="indicatorList">{indicators.map(i=><span key={i.id}>{i.name}</span>)}</div></section></div>}
-function ChainPage({chain}){return <div className="content"><section className="panel"><h3>Option Chain <small>TEST DATA</small></h3><div className="tableScroll"><table><tbody><tr><th>CE OI</th><th>CE LTP</th><th>CE Bid</th><th>CE Ask</th><th>Strike</th><th>PE Bid</th><th>PE Ask</th><th>PE LTP</th><th>PE OI</th></tr>{chain.map(r=><tr key={r.strike} className={r.atm?'atm':''}><td>{r.ce.oi}</td><td>{r.ce.ltp}</td><td>{r.ce.bid}</td><td>{r.ce.ask}</td><td><b>{r.strike}</b></td><td>{r.pe.bid}</td><td>{r.pe.ask}</td><td>{r.pe.ltp}</td><td>{r.pe.oi}</td></tr>)}</tbody></table></div></section></div>}
-function LadderPage(p){return <div className="content split"><Ladder {...p} full/><OrderPanel {...p}/></div>}
-function FactorPage({signal}){return <div className="content"><div className="metricGrid"><Metric k="Signal" v={signal?.signal||'STRONG BUY'} cls="pos"/><Metric k="Confidence" v={`${signal?.confidence||78}%`}/><Metric k="Trend" v={signal?.trend||'Bullish'} cls="pos"/><Metric k="Risk/Reward" v={`1:${signal?.risk_reward||2.35}`}/></div><section className="panel"><h3>Explainable Factor-J Audit <small>TEST DATA</small></h3><div className="audit">{(signal?.reasons||[]).map((r,i)=><div key={i}>✓ {r}</div>)}<div>Safety mode: PAPER — live action blocked</div></div></section></div>}
-function PaperPage({positions,trades,risk,refresh}){return <div className="content"><div className="metricGrid"><Metric k="Open Positions" v={positions.length}/><Metric k="Paper Trades" v={trades.length}/><Metric k="Max Lots" v={risk.max_lots||'-'}/><Metric k="Daily Loss Limit" v={`₹${risk.daily_loss_limit||0}`}/></div><div className="lower"><PositionsMini positions={positions}/><TradesMini trades={trades}/><section className="panel"><h3>Paper Engine</h3><p>Orders are processed by the FastAPI backend with lot-size and risk checks. Real broker orders are not sent.</p><button className="dangerAction" onClick={async()=>{await api('/api/paper/reset',{method:'POST'});refresh()}}>Reset Paper Account</button></section></div></div>}
-function LivePage({fyers}){return <div className="content"><section className="panel safety"><h2>FYERS Live Trading</h2><div className="metricGrid"><Metric k="Configured" v={fyers.configured?'YES':'NO'}/><Metric k="Authenticated" v={fyers.authenticated?'YES':'NO'}/><Metric k="Live Orders" v="DISABLED" cls="neg"/><Metric k="Safety Gate" v="LOCKED"/></div><p>{fyers.message}</p><div className="warning">No live order endpoint is enabled in this development build. FYERS will be connected only during explicit live verification.</div></section></div>}
-function PositionsPage({positions}){return <div className="content"><section className="panel"><h3>Positions</h3><table><tbody><tr><th>Mode</th><th>Product</th><th>Side</th><th>Lots</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&L</th><th>SL</th><th>TP</th></tr>{positions.map((x,i)=><tr key={i}><td>{x.mode}</td><td>{x.product}</td><td>{x.side}</td><td>{x.lots}</td><td>{x.quantity}</td><td>{x.avg}</td><td>{x.ltp}</td><td className={x.pnl>=0?'pos':'neg'}>{x.pnl}</td><td>{x.stop_loss}</td><td>{x.take_profit}</td></tr>)}</tbody></table></section></div>}
-function TradesPage({trades}){return <div className="content"><section className="panel"><h3>Trade History</h3><table><tbody><tr><th>Time</th><th>Mode</th><th>Product</th><th>Side</th><th>Lots</th><th>Qty</th><th>Price</th><th>Status</th></tr>{trades.map(t=><tr key={t.id}><td>{new Date(t.time).toLocaleTimeString()}</td><td>{t.mode}</td><td>{t.product}</td><td>{t.side}</td><td>{t.lots}</td><td>{t.quantity}</td><td>{t.price}</td><td>{t.status}</td></tr>)}</tbody></table></section></div>}
-function LogsPage({logs}){return <div className="content"><section className="panel"><h3>Backend Audit Logs</h3><div className="audit mono">{logs.length?logs.map((x,i)=><div key={i}>{x.time} — {x.event} — {x.detail}</div>):'No events yet'}</div></section></div>}
-function ReportsPage({trades,positions}){const pnl=positions.reduce((s,p)=>s+(p.pnl||0),0);return <div className="content"><div className="metricGrid"><Metric k="Trades" v={trades.length}/><Metric k="Open Positions" v={positions.length}/><Metric k="Net P&L" v={`₹${pnl.toFixed(2)}`} cls={pnl>=0?'pos':'neg'}/><Metric k="Mode" v="PAPER"/></div><section className="panel"><h3>Development Report</h3><p>Backend-connected paper-trading metrics are shown here. Backtesting and persisted analytics will be added after the core workflow is stable.</p></section></div>}
-function SettingsPage({risk,lotSizes,refresh}){const[maxLots,setMaxLots]=useState(risk.max_lots||4),[maxOpen,setMaxOpen]=useState(risk.max_open_positions||3),[loss,setLoss]=useState(risk.daily_loss_limit||5000),[msg,setMsg]=useState('');useEffect(()=>{setMaxLots(risk.max_lots||4);setMaxOpen(risk.max_open_positions||3);setLoss(risk.daily_loss_limit||5000)},[risk]);const save=async()=>{try{await api('/api/risk',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_lots:Number(maxLots),max_open_positions:Number(maxOpen),daily_loss_limit:Number(loss)})});setMsg('Saved');refresh()}catch(e){setMsg(e.message)}};return <div className="content split"><section className="panel order"><h3>Risk Settings</h3><label>Max Lots<input value={maxLots} onChange={e=>setMaxLots(e.target.value)}/></label><label>Max Open Positions<input value={maxOpen} onChange={e=>setMaxOpen(e.target.value)}/></label><label>Daily Loss Limit ₹<input value={loss} onChange={e=>setLoss(e.target.value)}/></label><div className="actions one"><button className="buyMain" onClick={save}>SAVE RISK SETTINGS</button></div>{msg&&<p>{msg}</p>}</section><section className="panel"><h3>Instrument Lot Sizes <small>TEST CONFIG</small></h3><div className="audit">{Object.entries(lotSizes).map(([s,l])=><div key={s}>{s}: <b>{l}</b></div>)}</div></section></div>}
-function Metric({k,v,cls=''}){return <div className="metric"><small>{k}</small><b className={cls}>{v}</b></div>}
-createRoot(document.getElementById('root')).render(<App/>);
+
+function PagePreview({name,chain,positions,trades,logs,risk,fyers,ladder,limit,pick}){
+ if(name==='Option Chain')return <div className="content"><section className="panel"><h3>Option Chain <small>TEST DATA</small></h3><div className="tableScroll"><table><tbody><tr><th>CE OI</th><th>CE LTP</th><th>Strike</th><th>PE LTP</th><th>PE OI</th></tr>{chain.map(r=><tr key={r.strike} className={r.atm?'atm':''}><td>{r.ce.oi}</td><td>{r.ce.ltp}</td><td><b>{r.strike}</b></td><td>{r.pe.ltp}</td><td>{r.pe.oi}</td></tr>)}</tbody></table></div></section></div>;
+ if(name==='Positions')return <div className="content"><PositionsMini positions={positions}/></div>;
+ if(name==='Trade History')return <div className="content"><TradesMini trades={trades}/></div>;
+ if(name==='Logs')return <div className="content"><section className="panel"><h3>Backend Audit Logs</h3><div className="audit mono">{logs.length?logs.map((x,i)=><div key={i}>{x.time} — {x.event} — {x.detail}</div>):'No events yet'}</div></section></div>;
+ if(name==='Price Ladder')return <div className="content"><Ladder ladder={ladder} limit={limit} pick={pick}/></div>;
+ if(name==='Live Trading')return <div className="content"><section className="panel safety"><h2>FYERS Live Trading</h2><div className="warning">Live orders are disabled during development verification.</div><p>{fyers.message||'FYERS not connected yet.'}</p></section></div>;
+ if(name==='Paper Trading')return <div className="content"><div className="metricGrid"><Metric k="Open Positions" v={positions.length}/><Metric k="Paper Trades" v={trades.length}/><Metric k="Max Lots" v={risk.max_lots||4}/><Metric k="Daily Loss Limit" v={'₹'+(risk.daily_loss_limit||5000)}/></div></div>;
+ return <div className="content"><section className="panel placeholder"><h2>{name}</h2><p>This page is stable and ready for the next incremental implementation.</p><span>DEVELOPMENT / TEST ENVIRONMENT</span></section></div>;
+}
+function Metric({k,v}){return <div className="metric"><small>{k}</small><b>{v}</b></div>}
+
+class ErrorBoundary extends React.Component{
+ constructor(props){super(props);this.state={error:null}}
+ static getDerivedStateFromError(error){return{error}}
+ render(){if(this.state.error)return <div style={{padding:30,color:'#fff',background:'#07101d',minHeight:'100vh'}}><h2>Option Bazaar frontend error</h2><pre style={{whiteSpace:'pre-wrap',color:'#ff9fa4'}}>{String(this.state.error)}</pre></div>;return this.props.children}
+}
+
+createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);

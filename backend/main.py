@@ -11,10 +11,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Option Bazaar Dev API", version="0.4.0")
+app = FastAPI(title="Option Bazaar Dev API", version="0.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 LOT_SIZES = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "SENSEX": 20}
+FYERS_INDEX_SYMBOLS = {
+    "NIFTY 50": "NSE:NIFTY50-INDEX",
+    "BANK NIFTY": "NSE:NIFTYBANK-INDEX",
+    "INDIA VIX": "NSE:INDIAVIX-INDEX",
+}
 positions: list[dict] = []
 trades: list[dict] = []
 logs: list[dict] = []
@@ -29,6 +34,7 @@ fyers = {
     "profile": None,
 }
 FYERS_API = "https://api-t1.fyers.in/api/v3"
+FYERS_DATA_API = "https://api-t1.fyers.in/data"
 
 class PaperOrder(BaseModel):
     symbol: str = "NIFTY"
@@ -63,17 +69,24 @@ def add_log(event: str, detail: str):
     del logs[200:]
 
 
-def fyers_request(path: str, method: str = "GET", payload: dict | None = None, auth: bool = False):
+def _fyers_headers(auth: bool = False):
     headers = {"Content-Type": "application/json"}
     if auth:
         if not fyers["app_id"] or not fyers["access_token"]:
             raise HTTPException(400, "FYERS access token is not available")
         headers["Authorization"] = f'{fyers["app_id"]}:{fyers["access_token"]}'
+    return headers
+
+
+def _request_json(url: str, method: str = "GET", payload: dict | None = None, auth: bool = False):
     data = json.dumps(payload).encode() if payload is not None else None
-    req = Request(FYERS_API + path, data=data, headers=headers, method=method)
+    req = Request(url, data=data, headers=_fyers_headers(auth), method=method)
     try:
         with urlopen(req, timeout=15) as response:
-            return json.loads(response.read().decode())
+            result = json.loads(response.read().decode())
+            if isinstance(result, dict) and result.get("s") == "error":
+                raise HTTPException(400, f"FYERS: {result.get('message') or 'request failed'}")
+            return result
     except HTTPError as e:
         body = e.read().decode(errors="replace")
         try:
@@ -83,6 +96,15 @@ def fyers_request(path: str, method: str = "GET", payload: dict | None = None, a
         raise HTTPException(e.code, f"FYERS: {detail}")
     except URLError as e:
         raise HTTPException(502, f"Could not reach FYERS: {e.reason}")
+
+
+def fyers_request(path: str, method: str = "GET", payload: dict | None = None, auth: bool = False):
+    return _request_json(FYERS_API + path, method, payload, auth)
+
+
+def fyers_data_request(path: str, params: dict | None = None):
+    query = "?" + urlencode(params or {}) if params else ""
+    return _request_json(FYERS_DATA_API + path + query, auth=True)
 
 @app.get("/api/health")
 def health():
@@ -220,11 +242,12 @@ def fyers_status():
     return {
         "configured": configured,
         "authenticated": authenticated,
+        "live_data_enabled": authenticated,
         "live_orders_enabled": False,
         "app_id": fyers["app_id"],
         "redirect_uri": fyers["redirect_uri"],
         "profile": fyers["profile"],
-        "message": "FYERS authenticated" if authenticated else ("FYERS credentials saved in backend memory" if configured else "Enter FYERS App ID, Secret ID and Redirect URL in Settings")
+        "message": "FYERS authenticated — live market data available" if authenticated else ("FYERS credentials saved in backend memory" if configured else "Enter FYERS App ID, Secret ID and Redirect URL in Settings")
     }
 
 @app.put("/api/fyers/config")
@@ -266,6 +289,48 @@ def fyers_profile():
     fyers["profile"] = result.get("data") or result
     return result
 
+@app.get("/api/fyers/quotes")
+def fyers_quotes(symbols: str = "NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:INDIAVIX-INDEX"):
+    result = fyers_data_request("/quotes", {"symbols": symbols})
+    return {"source": "FYERS LIVE", "received_at": now(), "raw": result}
+
+@app.get("/api/fyers/market-summary")
+def fyers_market_summary():
+    result = fyers_data_request("/quotes", {"symbols": ",".join(FYERS_INDEX_SYMBOLS.values())})
+    rows = result.get("d") or []
+    by_symbol = {}
+    for row in rows:
+        key = row.get("n") or row.get("symbol")
+        values = row.get("v") or {}
+        if key:
+            by_symbol[key] = values
+    indices = []
+    for display, broker_symbol in FYERS_INDEX_SYMBOLS.items():
+        values = by_symbol.get(broker_symbol, {})
+        indices.append({
+            "symbol": display,
+            "broker_symbol": broker_symbol,
+            "ltp": values.get("lp", 0),
+            "change": values.get("ch", 0),
+            "change_pct": values.get("chp", 0),
+            "open": values.get("open_price"),
+            "high": values.get("high_price"),
+            "low": values.get("low_price"),
+            "prev_close": values.get("prev_close_price"),
+        })
+    add_log("FYERS_LIVE_QUOTES", "Fetched live index quote snapshot from FYERS")
+    return {"source": "FYERS LIVE", "received_at": now(), "indices": indices}
+
+@app.get("/api/fyers/depth")
+def fyers_depth(symbol: str = "NSE:NIFTY50-INDEX"):
+    result = fyers_data_request("/depth", {"symbol": symbol, "ohlcv_flag": "1"})
+    return {"source": "FYERS LIVE", "received_at": now(), "raw": result}
+
+@app.get("/api/fyers/option-chain")
+def fyers_option_chain(symbol: str = "NSE:NIFTY50-INDEX", strikecount: int = 8):
+    result = fyers_data_request("/options-chain-v3", {"symbol": symbol, "strikecount": max(1, min(strikecount, 50))})
+    return {"source": "FYERS LIVE", "received_at": now(), "raw": result}
+
 @app.post("/api/fyers/disconnect")
 def fyers_disconnect():
     fyers.update({"access_token": "", "refresh_token": "", "profile": None})
@@ -280,4 +345,4 @@ def fyers_callback(auth_code: str = "", state: str = ""):
 
 @app.post("/api/live/orders")
 def live_order_blocker():
-    raise HTTPException(403, "LIVE ORDERS DISABLED: FYERS login may be tested, but live order placement remains locked")
+    raise HTTPException(403, "LIVE ORDERS DISABLED: FYERS live data may be tested, but order placement remains locked until explicit broker verification")
